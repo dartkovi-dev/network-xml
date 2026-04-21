@@ -1,0 +1,114 @@
+<style>
+  .ac-widget { max-width: 480px; margin: 0 auto; font-family: system-ui, -apple-system, sans-serif; padding: 20px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+  .ac-widget h3 { margin: 0 0 14px; font-size: 18px; font-weight: 600; color: #0f172a; }
+  .ac-widget input { width: 100%; padding: 12px 14px; margin: 6px 0; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 15px; box-sizing: border-box; transition: border 0.2s; }
+  .ac-widget input:focus { outline: none; border-color: #3b82f6; }
+  .ac-widget button { width: 100%; padding: 12px; margin-top: 10px; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 15px; font-weight: 500; cursor: pointer; transition: background 0.2s; }
+  .ac-widget button:hover { background: #1d4ed8; }
+  .ac-result { margin-top: 14px; padding: 12px; border-radius: 8px; font-size: 14px; line-height: 1.5; display: none; }
+  .ac-result.success { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+  .ac-result.warning { background: #fef3c7; color: #854d0e; border: 1px solid #fde047; }
+  .ac-result.error   { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+  .ac-loader { text-align: center; color: #64748b; font-size: 14px; padding: 10px; display: none; }
+</style>
+
+<div class="ac-widget">
+  <h3>🔍 Проверка доступности адреса</h3>
+  <input type="text" id="ac-street" placeholder="Начните вводить улицу..." list="ac-streets">
+  <datalist id="ac-streets"></datalist>
+  <input type="text" id="ac-house" placeholder="Номер дома (например: 15б)">
+  <button id="ac-check-btn">Проверить</button>
+  <div id="ac-loader" class="ac-loader">⏳ Загрузка реестра...</div>
+  <div id="ac-result" class="ac-result"></div>
+</div>
+
+<script>
+(function() {
+  // 🔧 НАСТРОЙКИ: выберите один источник XML
+  const USE_EMBEDDED = true; // true = XML вшит в код, false = загрузка по ссылке
+  const XML_URL = "https://raw.githubusercontent.com/dartkovi-dev/network-xml/main/adr.xml"; // Укажите, если USE_EMBEDDED = false
+
+  let addressDB = {};
+  let streetNames = [];
+
+  function init() {
+    const loader = document.getElementById("ac-loader");
+    loader.style.display = "block";
+
+    const parseAndSetup = (xmlText) => {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(xmlText, "text/xml");
+      if (doc.querySelector("parsererror")) {
+        showError("❌ Ошибка формата XML"); return;
+      }
+      doc.querySelectorAll("street").forEach(st => {
+        const name = (st.getAttribute("name") || "").trim();
+        const type = (st.getAttribute("type") || "").trim();
+        const fullName = type ? `${type} ${name}` : name;
+        if (!name) return;
+        addressDB[fullName] = {};
+        streetNames.push(fullName);
+        st.querySelectorAll("house").forEach(h => {
+          const num = (h.getAttribute("number") || "").trim();
+          const dt = (h.getAttribute("date") || "").trim();
+          if (num) addressDB[fullName][num] = dt;
+        });
+      });
+      document.getElementById("ac-streets").innerHTML = streetNames.map(s => `<option value="${s}">`).join("");
+      loader.style.display = "none";
+    };
+
+    if (USE_EMBEDDED) {
+      parseAndSetup(XML_EMBED);
+    } else {
+      fetch(XML_URL)
+        .then(r => r.ok ? r.text() : Promise.reject("Network error"))
+        .then(parseAndSetup)
+        .catch(() => showError("❌ Не удалось загрузить реестр адресов"));
+    }
+
+    document.getElementById("ac-check-btn").addEventListener("click", check);
+    ["ac-street","ac-house"].forEach(id => {
+      document.getElementById(id).addEventListener("keypress", e => { if(e.key==="Enter") check(); });
+    });
+  }
+
+  function check() {
+    const streetQ = document.getElementById("ac-street").value.trim().toLowerCase();
+    const houseQ  = document.getElementById("ac-house").value.trim().toLowerCase();
+    if (!streetQ || !houseQ) return showError("Заполните оба поля");
+
+    let matched = null;
+    for (const s in addressDB) { if (s.toLowerCase() === streetQ) { matched = s; break; } }
+    if (!matched) {
+      for (const s in addressDB) { if (s.toLowerCase().includes(streetQ) || streetQ.includes(s.toLowerCase())) { matched = s; break; } }
+    }
+    if (!matched) return showError("📍 Улица не найдена в реестре");
+
+    const houses = addressDB[matched];
+    let hMatch = null;
+    for (const h in houses) { if (h.toLowerCase() === houseQ) { hMatch = h; break; } }
+    if (!hMatch) return showError(`🏠 Дом ${document.getElementById("ac-house").value} не найден`);
+
+    const dateStr = houses[hMatch];
+    const todayISO = new Date().toISOString().split("T")[0];
+    const available = dateStr <= todayISO;
+
+    const msg = available
+      ? `✅ <b>${matched}, д. ${hMatch}</b> доступен с ${dateStr}`
+      : `⏳ <b>${matched}, д. ${hMatch}</b> будет доступен ${dateStr}`;
+    showResult(msg, available ? "success" : "warning");
+  }
+
+  function showResult(html, type) {
+    const box = document.getElementById("ac-result");
+    box.style.display = "block";
+    box.className = "ac-result " + type;
+    box.innerHTML = html;
+  }
+  function showError(text) { showResult(text, "error"); }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+  else init();
+})();
+</script>
